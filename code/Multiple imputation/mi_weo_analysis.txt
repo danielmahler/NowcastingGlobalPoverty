@@ -1,0 +1,284 @@
+<<dd_version: 2>>
+<<dd_include: 01.programs/02.dofile/mi/header.txt>>
+
+
+Multiple imputation of World Economic Outlook (WEO) Database
+===============================================================
+
+## Missing values Analysis
+
+### Cleaning and setting up analysis data
+Several things are done to clean and set up the data for analysis
+
+* povcalnet data by country and year
+* National accounts in PovcalNet website and cleaned in do-file "NationalAccounts.do"
+* Variables with more than 50% of missings values are excluded from the analysis. 
+
+~~~~
+<<dd_do:quietly>>
+* Personal directory
+if (lower("`c(username)'") == "wb384996") {
+	global perdrive "c:\Users\wb384996\OneDrive - WBG\Papers\global_poverty_nowcasting"
+}
+if (lower("`c(username)'") == "wb200957") {
+	global perdrive ""
+}
+if (lower("`c(username)'") == "wb514665") {
+	global perdrive ""
+}
+
+cd "${perdrive}"
+global dodir  "01.programs/02.dofile/mi"
+global graph  "03.output/05.figures/mi"
+global txtout "03.output/04.writeups/mi"
+
+* Run setup and mata functions
+run "${dodir}\_make_mifunctions.do"  // load and compile mata function
+
+***************
+use "${input}\changes_on_changes\FinalInputData.dta", clear
+rename *, lower
+
+rename code wbcode 
+drop  wdi* g* c* // delete this for complete analysis
+
+local N = _N
+local th = .5 // threshold
+disp "threshold: `=round(`N'*`th')'"
+missings report,  minimum(`=round(`N'*`th')')
+
+if ("`r(varlist)'" != "") drop `r(varlist)'
+
+<</dd_do>>
+~~~~
+
+### Analysis of missing values
+
+First, we analysis the proportion of missings values in the dataset. The graph below shows the proportion share of variables that have a particular proportion of missings values. 
+
+~~~~
+<<dd_do:quietly>>
+ds *, has(type numeric)
+local numvars = "`r(varlist)'"
+
+qui misstable pattern, freq
+local a = "`r(vars)'"
+local b: list numvars - a
+local varmiss: list numvars - b
+disp "`varmiss'"
+
+putmata Vars = (`numvars'), replace  view         // variable labels
+mata: Vnames = tokens("`numvars'")  // variable names
+
+// Matrix with index of minimums
+mata: minin = mi_minmat(Vars) // Add second argument h to change the minimum from 1 to h-1
+mata: A = minin.Nmiss
+
+* Histogram
+tempvar nmiss
+getmata `nmiss' = A, force
+count
+replace `nmiss' = `nmiss'/r(N)
+label var `nmiss'  "proportion of missing values"
+hist `nmiss', bin(50) percent
+<</dd_do>>
+~~~~
+<<dd_graph: sav("miss_share.svg") alt("proportion of missing values") replace height(400)>>
+
+
+Second, out of the <<dd_display: %4.2f `c(k)' >> variables analyzed, the following variables have zero missing values:
+
+~~~~
+<<dd_do:nocommands>>
+mata: mi_nomiss(minin, Vnames)
+disp "`cvar'"
+<</dd_do>>
+~~~~
+
+### Are My Data MCAR, MAR, or MNAR?
+
+We need to check first whether it is necessary to impute missing values. If data are missing completely at random (MCAR), then throwing out cases with missing data does not bias your inferences . However, if data is MAR (missing at random), the probability that 
+a variable is missing depends only on observed data, but not the missing data itself, or 
+unobserved data, so it is necessary to imput missing values to avoid biases in the estimation.
+
+There are several ways to check whether the data is MCAR, MAR, MNAR (missing not at randome), or CDM (covariate-dependent missingness), yet none of them is a formal test to determine whether the pattern of missingness. One way is to run logit models to test if any of the other variables predict whether a given variable is missing. 
+If they do, then the data is more likely to be MAR rather than MCAR. This approach is costly and the results are diffictul to summarize given it requires to run <<dd_display: %4.2f _N -1>> logit models. 
+
+A simpler approach would be to run t-test to see if the values of the other variables vary between missingness groups. For the <<dd_display: %4.2f `c(k)' >> variables used this time, graph below shows how what variables are closer to be MCAR.
+
+~~~~
+<<dd_do:quietly>>
+
+local numvars: list numvars - cvar  // complete cases
+
+
+cap drop miss_*
+qui misstable sum, gen(miss_)
+
+
+local union: list varmiss & numvars
+
+global nw = wordcount("`numvars'")
+
+local n = wordcount("`varmiss'")*wordcount("`numvars'") - wordcount("`union'")
+
+mata: T = J(0,0, "")
+local i  = 0
+foreach var of local varmiss {
+	local covars: list numvars - var
+	foreach nvar of local covars {
+		local ++i
+
+
+		*display _newline(3) "ttest of `nvar' by missingness of `var'"
+		cap ttest `nvar', by(miss_`var')
+
+		if (_rc) local p = "."
+		else local p = strofreal(round(r(p), .0001))
+
+		noi mata: T = mi_ttest_results(T, "`var'", "`nvar'", "`p'")
+		
+	}
+
+}
+mata: t = strtoreal(T[,3]); /*
+*/   T2 = T[selectindex(t:<0.05),]
+
+preserve
+drop _all
+getmata (missvar numvars p)=T2, replace force
+destring p, replace force
+
+contract missvar, freq(n)
+replace missvar = subinstr(missvar, "weo_", "", 1)
+
+local nw = ${nw}
+
+graph hbar n, over(missvar, sort(n) reverse) yline(`nw') /*
+*/  yscale(range(0 `=`nw'+5'))  ylabel(0(`=round(`nw'/5)')`=`nw'+5') /*
+*/  ytitle("No. of vars that do not vary between missingness", size(small)) /*
+*/  title("Variables close to MCAR", span size(medium))  intensity(25)
+restore
+
+<</dd_do>>
+~~~~
+<<dd_graph: sav("close_mcar.svg") alt("Variables close to MCAR") replace height(400)>>
+
+
+Another approach is to use the [Litte's MCAR test](https://www.tandfonline.com/doi/abs/10.1080/01621459.1995.10476615), implemented by Cheng Li ([2013](https://journals.sagepub.com/doi/pdf/10.1177/1536867X1301300407)) for Stata in the command `mcartest`. 
+The main problem with this test is of convergence as the number of variables increase. Yet, it is worth taking a look at it more carefully. 
+
+
+## Multiple imputation
+~~~~
+<<dd_do:quietly>>
+
+gen o_year = year // original year
+replace year =  yearly(strofreal(round(year)), "Y")
+format year %ty
+
+* New ID variable
+encode wbcode, gen(code)
+gen id = real(strofreal(code)+"0"+strofreal(datatype))
+
+levelsof id, local(ids)
+foreach id of local ids {
+	if regexm("`id'", "([0-9]+)0([12])$") {
+		local code: label code `=regexs(1)'
+		if (`=regexs(2)' == 1) {
+			local data "C"
+		}
+		else local data "I"
+	}
+	label define id `id' "`code'-`data'", modify
+}
+label values id id
+
+
+mi set mlong
+mi xtset id year
+
+*---------- Missing analysis 
+mi misstable summarize weo*
+mi misstable patterns weo*
+mi misstable nested weo*
+
+
+*---------- register miss variable WEO
+mi register imputed weo*
+mi register imputed mean headcount
+<</dd_do>>
+~~~~
+
+To perform multiple imputation, it inecessary to `set` the data as panel. Given that we have two types of welfare aggregate (i.e., income and consumption) we need to crete an auxiliary `id` variable to set the data.
+
+~~~~
+<<dd_ignore>>
+* more cleaning is done before this, 
+gen id = real(strofreal(code)+"0"+strofreal(datatype))
+mi set mlong
+mi xtset id year
+<</dd_ignore>>
+~~~~
+
+The success of the overall imputation model depends on the success of all the individual models. If a single model fails to converge, the imputation process as a whole will fail. If a single model is misspecified, it may bias the results of the analysis model. Given that all the variables are continuous, it makes sense to use a standard `regress` model. However, since we cannot asure normality in each of them, we use **Predictive Mean Matching (PMM)**. 
+
+~~~~
+<<dd_skip_if:="`_dta[_mi_marker]'"!="">>
+<<dd_do:quietly>>
+global m = 5
+mi impute chained (pmm, knn(10) ) weo* = mean, add(${m}) rseed(123456) /* 
+ */ by(datatype) force
+<</dd_do>>
+<<dd_skip_end>>
+
+<<dd_ignore>>
+global m = 5
+mi impute chained (pmm, knn(10) ) weo* = mean, add(${m}) rseed(123456) /* 
+ */ by(datatype) force 
+<</dd_ignore>>
+~~~~
+
+
+The command `midiagplot`, available by typing `net install st0263.pkg` makes diagnostic plots that compare the distribution of the imputed values with the observed ones. 
+	
+![ggxwdg]("c:/Users/wb384996/OneDrive - WBG/Papers/global_poverty_nowcasting/03.output/05.figures/mi/midiag_weo_ggxwdg.png")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

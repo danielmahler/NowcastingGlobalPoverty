@@ -1,0 +1,116 @@
+Files starting with:
+00: Programs that will be called in subsequent .do-files
+01: Takes some raw data and procceses them
+02: Merges all input data and creates the final dataset used for predictions
+03: Predicts the headcount/mean/median/gini using the various methods
+04: Merges the predictions
+05: Converts the predictions in the mean/median (and at times, gini) into headcount predictions
+06: Merges the predictions from 04 with 05
+07: Calculates errors
+08: Produces main figures
+09: Sample figures for paper unrelated to much of the rest of the code
+The folder "Multiple imputation" contains separate scripts that multiply imputes the final input data.
+
+Below is a more detailed description:
+
+00.matrix_rename.do:
+- A program that allows to change row and column names of matrices. This .do-file will be called in later .do-files
+
+01a.CLASS.do
+- Prepares the CLASS files
+
+01b.WDI.do:
+- Takes the WDI data and processes it, and keeps the relevant variables that we want to use for the analysis. 
+
+01c.WEO.do:
+- Takes the raw WEO data and processes it, and keeps the relevant variables that we want to use for the analysis. 
+
+01d.NationalAccounts.do:
+- Takes the national accounts file from another repository and keeps the relevant information.
+
+01e.PovcalNet_fulldisttributions.do:
+- Recovers the full distributions of all survey points
+
+01f.PovcalNet_poverty.do:
+- Generates the dataset of poverty estimates, weights, and samples.
+
+01g.Population.do:
+- Generates population data
+
+01h.RemoteSensing.do
+- Cleans the remote sensing data
+
+01i.WEO_historcal.do
+- Cleans the historical WEO GDP nowcasts and forecasts
+
+02a.merge_data.do
+- Merges all data files from 01.* .do-files
+
+02b.merge_data_lag.do
+- Merges all data files from 01.* .do-files while assuming that a missing value takes the lagged value
+
+02c.Multiple_imputation.do
+- Cleans the multiply imputed dataset generated in the scripts in the subfoldre "Multiple imputation"
+
+03a.status_quo_national_accounts_and_perfect
+- Generates status quo predictions, predictions from using other national accounts rules and 'perfect' mean predictions, i.e. predictions that are identical to the true values.
+
+03b.CART.R:
+- Makes predictions using CART random forests
+
+03c.CIF.R:
+- Makes predictions using conditional inference random forests
+
+03d.CIFlag.R:
+- Makes predictions using conditional inference random forests  assuming a missing value takes a lagged value
+
+03e.XGBOOST.R
+- Makes predictions using gradient boosting
+
+03f.mi_lasso.do:
+- Makes predictions using the lasso
+
+03g.mi_lasso_postscript.do
+- Cleans the output of the lasso predictions
+
+03h.diagnostics.do
+- Looks if the predictions and tuning grids from the other 03 files are reasonable
+
+04a.merge_predictions_step1.do
+- Merges all predictions from step 3
+
+05a.predicted_headcount_two_parameter_distributions.do:
+- Computes predicted headcounts for methods that use two-parameter distributional assumptions
+
+05b.predicted_headcount_povcal.do:
+- Computes predicted headcounts assuming distribution neutrality
+
+05c.predicted_headcount_gic.do:
+- Computes predicted headcount rates utiltizing growth incidence curves
+
+06.merge_predictions_step1.do
+- Takes direct predictions and merges them from the ones that have used distributional assumptions to get poverty predictions. It then cleans the final prediction data.
+
+07.calculate_error.do:
+- Takes all predictions and calucates errors
+
+08a.PlotErrors_Collapsed.do
+- Plots the summary error statistics by method
+
+08b.PlotError_NonCollapsed
+- Plots figures using non-collapsed errors.
+
+08c.GlobalPoverty
+- Calculates global/regional/country-level poverty using all method
+
+08d.GlobalPovertyMap.R
+- Produces the global poverty map
+
+08e.GDPvintage.do
+- Produces the figures using vintages of WEO growth forecasts/nowcasts
+
+08f.OnlineAppendix.do
+- Produces figures/tables for the online appendix
+
+09a.SampleFiguresForPape
+- Produces figures for the paper explaining how it works to predict the mean and the mean/Gini.
